@@ -1,18 +1,32 @@
-# ── Workflow 1: HTTP → Blob ────────────────────────────────────────────────────
-# HOW IT WORKS:
-#   1. Someone sends HTTP POST with JSON body { "message": "...", "requestId": "..." }
-#   2. Logic App receives it via the trigger URL
-#   3. The payload is saved as {requestId}.json inside the workflow-runs blob container
+# ── Workflow: HTTP Request → Response + Save to Blob ──────────────────────────
 #
-# TO TEST:
-#   curl -X POST "<trigger_url>" \
+# This is the simplest possible real workflow to learn with.
+# You can see it running in Azure Portal → Logic App → Overview → Runs history
+#
+# FLOW:
+#   HTTP POST  →  Send Response (200 OK)  →  Save payload blob
+#
+# HOW TO GET THE TRIGGER URL (after terraform apply):
+#   1. Azure Portal → Resource Groups → rg-logicapp-learn
+#   2. Click the Logic App resource
+#   3. Click "Logic app designer" in left menu
+#   4. Click the trigger step "When HTTP request received"
+#   5. Copy the "HTTP POST URL" shown there
+#
+# HOW TO TEST with curl:
+#   curl -X POST "<paste trigger url here>" \
 #     -H "Content-Type: application/json" \
-#     -d '{"message": "hello", "requestId": "run-001"}'
+#     -d '{"message": "hello from curl", "requestId": "test-001"}'
 #
-# RESULT: blob created at  workflow-runs/run-001.json
+# EXPECTED RESPONSE:
+#   {"status": "saved", "requestId": "test-001"}
+#
+# WHERE TO SEE RUNS:
+#   Azure Portal → Logic App → Overview → Runs history tab
 
-resource "azurerm_logic_app_trigger_http_request" "http_to_blob" {
-  name         = "when-http-request-received"
+# ── Step 1: HTTP Trigger ───────────────────────────────────────────────────────
+resource "azurerm_logic_app_trigger_http_request" "simple_http" {
+  name         = "When_HTTP_request_received"
   logic_app_id = azurerm_logic_app_workflow.this.id
 
   schema = jsonencode({
@@ -21,12 +35,40 @@ resource "azurerm_logic_app_trigger_http_request" "http_to_blob" {
       message   = { type = "string" }
       requestId = { type = "string" }
     }
-    required = ["requestId"]
+    required = ["requestId", "message"]
   })
 }
 
-resource "azurerm_logic_app_action_custom" "save_payload_to_blob" {
-  name         = "save-payload-to-blob"
+# ── Step 2: Send HTTP Response back to caller ──────────────────────────────────
+# This runs immediately — caller gets 200 OK before the blob save happens
+resource "azurerm_logic_app_action_custom" "send_response" {
+  name         = "Send_Response"
+  logic_app_id = azurerm_logic_app_workflow.this.id
+
+  body = jsonencode({
+    type = "Response"
+    kind = "Http"
+    inputs = {
+      statusCode = 200
+      headers = {
+        "Content-Type" = "application/json"
+      }
+      body = {
+        status    = "saved"
+        requestId = "@{triggerBody()?['requestId']}"
+        message   = "Workflow received: @{triggerBody()?['message']}"
+      }
+    }
+    runAfter = {}
+  })
+
+  depends_on = [azurerm_logic_app_trigger_http_request.simple_http]
+}
+
+# ── Step 3: Save payload to blob storage ──────────────────────────────────────
+# Runs after response is sent — non-blocking for the caller
+resource "azurerm_logic_app_action_custom" "save_to_blob" {
+  name         = "Save_to_Blob_Storage"
   logic_app_id = azurerm_logic_app_workflow.this.id
 
   body = jsonencode({
@@ -44,10 +86,17 @@ resource "azurerm_logic_app_action_custom" "save_payload_to_blob" {
         name                         = "@{triggerBody()?['requestId']}.json"
         queryParametersSingleEncoded = true
       }
-      body = "@triggerBody()"
+      body = {
+        requestId = "@{triggerBody()?['requestId']}"
+        message   = "@{triggerBody()?['message']}"
+        savedAt   = "@{utcNow()}"
+      }
     }
-    runAfter = {}
+    # runs after response is already sent to caller
+    runAfter = {
+      Send_Response = ["Succeeded"]
+    }
   })
 
-  depends_on = [azurerm_logic_app_trigger_http_request.http_to_blob]
+  depends_on = [azurerm_logic_app_action_custom.send_response]
 }

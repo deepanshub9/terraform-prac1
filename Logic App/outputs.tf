@@ -6,6 +6,10 @@ output "logic_app_access_endpoint" {
   value = module.logic_app.logic_app_default_hostname
 }
 
+output "logic_app_portal_url" {
+  value = module.logic_app.logic_app_portal_url
+}
+
 output "workflow_storage_container" {
   value = module.storage.workflow_runs_container_name
 }
