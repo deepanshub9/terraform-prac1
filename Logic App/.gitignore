@@ -1,0 +1,19 @@
+# Terraform state — contains sensitive data, never commit
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform plan output — can contain secrets
+*.tfplan
+
+# Local .terraform directory — provider binaries
+.terraform/
+.terraform.lock.hcl
+
+# Override files
+override.tf
+override.tf.json
+
+# Variable files with real values (keep terraform.tfvars out of git in real projects)
+# Uncomment the line below when working on a real banking project:
+# terraform.tfvars
